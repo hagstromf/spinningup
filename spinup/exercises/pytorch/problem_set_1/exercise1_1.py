@@ -1,3 +1,4 @@
+from importlib_metadata import distribution
 import torch
 import numpy as np
 
@@ -23,12 +24,15 @@ def gaussian_likelihood(x, mu, log_std):
     Returns:
         Tensor with shape [batch]
     """
-    #######################
-    #                     #
-    #   YOUR CODE HERE    #
-    #                     #
-    #######################
-    return torch.zeros(1)
+
+    ### Below also works, though unnecessary when we just need to calculate likelihood.
+    #batch, dim = x.shape
+    #cov_mat = torch.diag(torch.exp(log_std)**2).expand(batch, dim, dim)
+    #m = torch.distributions.multivariate_normal.MultivariateNormal(mu, cov_mat)
+    #return m.log_prob(x)
+
+    return -1/2 * torch.sum(((x - mu) / torch.exp(log_std))**2 + 2*log_std + np.log(2*np.pi), -1)
+
 
 
 if __name__ == '__main__':
@@ -47,6 +51,8 @@ if __name__ == '__main__':
 
     your_gaussian_likelihood = gaussian_likelihood(x, mu, log_std)
     true_gaussian_likelihood = exercise1_1_soln.gaussian_likelihood(x, mu, log_std)
+    print(your_gaussian_likelihood)
+    print(true_gaussian_likelihood)
 
     your_result = your_gaussian_likelihood.detach().numpy()
     true_result = true_gaussian_likelihood.detach().numpy()

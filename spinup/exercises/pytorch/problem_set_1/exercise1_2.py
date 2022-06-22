@@ -33,12 +33,13 @@ def mlp(sizes, activation, output_activation=nn.Identity):
         (Use an nn.Sequential module.)
 
     """
-    #######################
-    #                     #
-    #   YOUR CODE HERE    #
-    #                     #
-    #######################
-    pass
+    layers = []
+
+    for i in range(1, len(sizes)):
+        act = activation if i < len(sizes)-1 else output_activation
+        layers += [nn.Linear(sizes[i-1], sizes[i]), act()]
+    
+    return nn.Sequential(*layers)
 
 class DiagonalGaussianDistribution:
 
@@ -57,7 +58,9 @@ class DiagonalGaussianDistribution:
         #   YOUR CODE HERE    #
         #                     #
         #######################
-        pass
+        s = self.mu.shape
+        noise = torch.normal(mean=0, std=1, size=s)
+        return self.mu + torch.exp(self.log_std) * noise
 
     #================================(Given, ignore)==========================================#
     def log_prob(self, value):
@@ -87,7 +90,9 @@ class MLPGaussianActor(nn.Module):
         #######################
         # self.log_std = 
         # self.mu_net = 
-        pass 
+
+        self.log_std = nn.parameter.Parameter(-0.5 * torch.ones(act_dim))
+        self.mu_net = mlp([obs_dim] + list(hidden_sizes) + [act_dim], activation)
 
     #================================(Given, ignore)==========================================#
     def forward(self, obs, act=None):
@@ -119,10 +124,12 @@ if __name__ == '__main__':
 
     ActorCritic = partial(exercise1_2_auxiliary.ExerciseActorCritic, actor=MLPGaussianActor)
     
-    ppo(env_fn = lambda : gym.make('InvertedPendulum-v2'),
-        actor_critic=ActorCritic,
-        ac_kwargs=dict(hidden_sizes=(64,)),
-        steps_per_epoch=4000, epochs=20, logger_kwargs=dict(output_dir=logdir))
+    ### Use if Mujoco is available 
+    '''
+    #ppo(env_fn = lambda : gym.make('InvertedPendulum-v2'),
+    #    actor_critic=ActorCritic,
+    #    ac_kwargs=dict(hidden_sizes=(64,)),
+    #    steps_per_epoch=4000, epochs=20, logger_kwargs=dict(output_dir=logdir))
 
     # Get scores from last five epochs to evaluate success.
     data = pd.read_table(os.path.join(logdir,'progress.txt'))
@@ -132,3 +139,25 @@ if __name__ == '__main__':
     # or if it reaches the top possible score of 1000, in the last five epochs.
     correct = np.mean(last_scores) > 500 or np.max(last_scores)==1e3
     print_result(correct)
+    '''
+
+    ### If mujoco is not available 
+    ppo(env_fn = lambda : gym.make("Pendulum-v0"),
+        actor_critic=ActorCritic,
+        ac_kwargs=dict(hidden_sizes=(64,)),
+        steps_per_epoch=4000, epochs=20, logger_kwargs=dict(output_dir=logdir))
+
+    # Get scores from last five epochs to evaluate success.
+    data = pd.read_table(os.path.join(logdir,'progress.txt'))
+    own_last_scores = data['AverageEpRet'][-5:]
+    
+    ppo(env_fn = lambda : gym.make("Pendulum-v0"),
+        ac_kwargs=dict(hidden_sizes=(64,)),
+        steps_per_epoch=4000, epochs=20, logger_kwargs=dict(output_dir=logdir))
+
+    # Get scores from last five epochs to evaluate success.
+    data = pd.read_table(os.path.join(logdir,'progress.txt'))
+    spinup_last_scores = data['AverageEpRet'][-5:]
+
+    print(f"Own implementation achieves aveage score \n {own_last_scores} \n while \
+        spinup implementation achieves \n {spinup_last_scores}")

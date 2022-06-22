@@ -204,37 +204,21 @@ def td3(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         o, a, r, o2, d = data['obs'], data['act'], data['rew'], data['obs2'], data['done']
 
         # Q-values
-        #######################
-        #                     #
-        #   YOUR CODE HERE    #
-        #                     #
-        #######################
-        # q1 = 
-        # q2 = 
+        q1 = ac.q1(o, a)
+        q2 = ac.q2(o, a)
 
         # Target policy smoothing
-        #######################
-        #                     #
-        #   YOUR CODE HERE    #
-        #                     #
-        #######################
+        pi_targ = ac_targ.pi(o2)
+        a_targ = pi_targ + torch.clamp(target_noise * torch.randn_like(pi_targ), -noise_clip, noise_clip)
+        a_targ = torch.clamp(a_targ, -act_limit, act_limit)
 
         # Target Q-values
-        #######################
-        #                     #
-        #   YOUR CODE HERE    #
-        #                     #
-        #######################
+        y = r + gamma * (1 - d) * torch.min(ac_targ.q1(o2, a_targ), ac_targ.q2(o2, a_targ))
 
         # MSE loss against Bellman backup
-        #######################
-        #                     #
-        #   YOUR CODE HERE    #
-        #                     #
-        #######################
-        # loss_q1 = 
-        # loss_q2 = 
-        # loss_q = 
+        loss_q1 = torch.nn.functional.mse_loss(q1, y)
+        loss_q2 = torch.nn.functional.mse_loss(q2, y)
+        loss_q = loss_q1 + loss_q2 
 
         # Useful info for logging
         loss_info = dict(Q1Vals=q1.detach().numpy(),
@@ -244,12 +228,10 @@ def td3(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 
     # Set up function for computing TD3 pi loss
     def compute_loss_pi(data):
-        #######################
-        #                     #
-        #   YOUR CODE HERE    #
-        #                     #
-        #######################
-        # loss_pi = 
+        o = data['obs']
+        pi_targ = ac.pi(o)
+        q1_targ = ac.q1(o, pi_targ)
+        loss_pi = - q1_targ.mean()
         return loss_pi
 
     #=========================================================================#
