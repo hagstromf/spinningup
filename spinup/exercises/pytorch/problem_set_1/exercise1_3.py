@@ -377,6 +377,8 @@ if __name__ == '__main__':
     parser.add_argument('--seed', '-s', type=int, default=0)
     parser.add_argument('--exp_name', type=str, default='ex13-td3')
     parser.add_argument('--use_soln', action='store_true')
+    parser.add_argument('--epochs', type=int, default=10)
+    parser.add_argument('--max_ep_len', type=int, default=150)
     args = parser.parse_args()
 
     from spinup.utils.run_utils import setup_logger_kwargs
@@ -386,10 +388,10 @@ if __name__ == '__main__':
         env_fn=lambda : gym.make(args.env), 
         actor_critic=core.MLPActorCritic,
         ac_kwargs=dict(hidden_sizes=[128,128]), 
-        max_ep_len=150,
+        max_ep_len=args.max_ep_len,
         seed=args.seed, 
         logger_kwargs=logger_kwargs,
-        epochs=10
+        epochs=args.epochs
         )
     
     if args.use_soln:
