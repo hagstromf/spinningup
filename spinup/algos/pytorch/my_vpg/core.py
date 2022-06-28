@@ -4,6 +4,8 @@ import torch.nn as nn
 
 import numpy as np
 
+from torch.distributions.normal import Normal
+from torch.distributions.categorical import Categorical
 
 class VPGBuffer:
 
@@ -20,7 +22,6 @@ class VPGBuffer:
         self.adv_buf = np.zeros(size, dtype=np.float32)
 
         self.gamma = gamma
-
         self.device = device
 
         self.curr_step, self.path_start, self.max_size = 0, 0, size
@@ -108,11 +109,11 @@ def test_buffer(device='cpu'):
 
     print()
     print("Check shapes of different buffers:")
-    assert obs.shape == (32, 10, 3)
+    assert obs.shape == (size, *obs_dim)
     print(obs.shape)
-    assert act.shape == (32, 5)
+    assert act.shape == (size, act_dim)
     print(act.shape)
-    assert rew.shape == (32, )
+    assert rew.shape == (size, )
     print(rew.shape)
     print(val.shape)
     print(rtg.shape)
@@ -151,21 +152,75 @@ def mlp(sizes, activation, output_activation=nn.Identity):
     return nn.Sequential(*layers)
 
 
-class MLPActor(nn.Module):
-    pass
-    #def __init__(self, obs_dim, hidden_sizes, act_dim, activation, device='cpu'):
-    #    super().__init__()
+class Actor(nn.Module):
 
-    #    self.obs_dim = obs_dim
-    #    self.hidden_sizes = hidden_sizes
-    #    self.act_dim = act_dim
-    #    self.device = device
+    def __distribution(self, obs):
+        raise NotImplementedError
+
+    def __log_prob(self, pi, act):
+        raise NotImplementedError
+
+    def forward(self, obs, act=None):
+        pi = self.__distribution(obs)
+        logp_a = None
+        if act is not None:
+            logp_a = self.__log_prob(pi, act)
+
+        return pi, logp_a
 
 
+class MLPDiscreteActor(Actor):
+    def __init__(self, obs_dim, hidden_sizes, act_dim, activation, device='cpu'):
+        super().__init__()
+
+        #self.obs_dim = obs_dim
+        #self.hidden_sizes = hidden_sizes
+        #self.act_dim = act_dim
+        #self.device = device
+
+        self.net = mlp([obs_dim] + list(hidden_sizes) + [act_dim], activation)
+
+
+    def __distribution(self, obs):
+        logits = self.net(obs)
+        return Categorical(logits=logits)
+
+    def __log_prob(self, pi, act):
+        return pi.log_prob(act)
+
+
+class MLPContinuousActor(Actor):
+    
+    def __init__(self, obs_dim, hidden_sizes, act_dim, activation, device='cpu'):
+        super().__init__()
+
+        self.mu = mlp([obs_dim] + list(hidden_sizes) + [act_dim], activation)
+        self.log_std = nn.parameter.Parameter(-0.5 * torch.ones(act_dim)) #.to(device)
+
+    
+    def __distribution(self, obs):
+        mu = self.mu(obs)
+        std = torch.exp(self.log_std)
+        return Normal(mu, std)
+
+
+    def __log_prob(self, pi, act):
+        return torch.sum(pi.log_prob(act), dim=1)
 
 
 class MLPCritic(nn.Module):
-    pass
+    def __init__(self, obs_dim, hidden_sizes, act_dim, activation, device='cpu'):
+        super().__init__()
+
+        self.v = mlp([obs_dim] + list(hidden_sizes) + [act_dim], activation)
+
+    def forward(self, obs):
+        return self.v(obs)
+
+class MLPActorCritic(nn.Module):
+    
+    def __init__(self, obs_space, act_space, hidden_sizes):
+        pass
 
 
 if __name__ == '__main__':
@@ -179,4 +234,4 @@ if __name__ == '__main__':
     else:
         device = 'cpu'
 
-    test_buffer(device)
+    #test_buffer(device)
