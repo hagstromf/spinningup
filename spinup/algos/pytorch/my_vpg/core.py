@@ -7,6 +7,9 @@ import numpy as np
 from torch.distributions.normal import Normal
 from torch.distributions.categorical import Categorical
 
+import gym
+from gym.spaces import Discrete, Box
+
 class VPGBuffer:
 
     ### TODO:
@@ -144,7 +147,7 @@ def mlp(sizes, activation, output_activation=nn.Identity):
 
     """
     layers = []
-
+    #print("Layer sizes: ", sizes)
     for i in range(1, len(sizes)):
         act = activation if i < len(sizes)-1 else output_activation
         layers += [nn.Linear(sizes[i-1], sizes[i]), act()]
@@ -154,38 +157,43 @@ def mlp(sizes, activation, output_activation=nn.Identity):
 
 class Actor(nn.Module):
 
-    def __distribution(self, obs):
+    # TODO: Document Actor class and its subclasses
+
+    def _distribution(self, obs):
         raise NotImplementedError
 
-    def __log_prob(self, pi, act):
+    def _log_prob(self, pi, act):
         raise NotImplementedError
 
     def forward(self, obs, act=None):
-        pi = self.__distribution(obs)
+        if obs.ndimension() > 1:
+            obs = torch.flatten(obs, start_dim=1)
+        pi = self._distribution(obs)
         logp_a = None
         if act is not None:
-            logp_a = self.__log_prob(pi, act)
+            logp_a = self._log_prob(pi, act)
 
         return pi, logp_a
 
 
 class MLPDiscreteActor(Actor):
+
     def __init__(self, obs_dim, hidden_sizes, act_dim, activation, device='cpu'):
         super().__init__()
 
-        #self.obs_dim = obs_dim
-        #self.hidden_sizes = hidden_sizes
-        #self.act_dim = act_dim
-        #self.device = device
+        #print("Obs before: ", obs_dim)
+        if not np.isscalar(obs_dim):
+            obs_dim = np.prod(obs_dim)
+        #print("Obs after: ", obs_dim)
 
         self.net = mlp([obs_dim] + list(hidden_sizes) + [act_dim], activation)
 
 
-    def __distribution(self, obs):
+    def _distribution(self, obs):
         logits = self.net(obs)
         return Categorical(logits=logits)
 
-    def __log_prob(self, pi, act):
+    def _log_prob(self, pi, act):
         return pi.log_prob(act)
 
 
@@ -194,38 +202,150 @@ class MLPContinuousActor(Actor):
     def __init__(self, obs_dim, hidden_sizes, act_dim, activation, device='cpu'):
         super().__init__()
 
+        #print("Obs before: ", obs_dim)
+        if not np.isscalar(obs_dim):
+            obs_dim = np.prod(obs_dim)
+        #print("Obs after: ", obs_dim)
+
         self.mu = mlp([obs_dim] + list(hidden_sizes) + [act_dim], activation)
         self.log_std = nn.parameter.Parameter(-0.5 * torch.ones(act_dim)) #.to(device)
 
     
-    def __distribution(self, obs):
+    def _distribution(self, obs):
         mu = self.mu(obs)
         std = torch.exp(self.log_std)
         return Normal(mu, std)
 
 
-    def __log_prob(self, pi, act):
+    def _log_prob(self, pi, act):
         return torch.sum(pi.log_prob(act), dim=1)
 
 
 class MLPCritic(nn.Module):
-    def __init__(self, obs_dim, hidden_sizes, act_dim, activation, device='cpu'):
+
+    # TODO: Document Critic class
+
+    def __init__(self, obs_dim, hidden_sizes, activation, device='cpu'):
         super().__init__()
 
-        self.v = mlp([obs_dim] + list(hidden_sizes) + [act_dim], activation)
+        #print("Obs before: ", obs_dim)
+        if not np.isscalar(obs_dim):
+            obs_dim = np.prod(obs_dim)
+        #print("Obs after: ", obs_dim)
+
+        self.v = mlp([obs_dim] + list(hidden_sizes) + [1], activation)
 
     def forward(self, obs):
-        return self.v(obs)
+        #print(obs.ndimension())
+        if obs.ndimension() > 1:
+            obs = torch.flatten(obs, start_dim=1)
+            #print("Flattened obs", obs.shape)
+        #print(obs.shape)
+        return self.v(obs).squeeze() # Ensure v has shape (batch_size, ) instead of (batch_size, 1)
+
 
 class MLPActorCritic(nn.Module):
-    
-    def __init__(self, obs_space, act_space, hidden_sizes):
-        pass
 
+    # TODO: Document ActorCritic class
+    
+    def __init__(self, obs_space, act_space, hidden_sizes=[128, 128], activation=nn.ReLU, device='cpu'):
+        super().__init__()
+
+        self.obs_dim = obs_space.shape
+
+        #print()
+        #print("Building critic:")
+
+        self.critic = MLPCritic(self.obs_dim, hidden_sizes, activation, device)
+
+        #print()
+        #print("Building actor:")
+        if isinstance(act_space, Box):
+            #act_dim = act_space.shape[0]
+            self.act_dim = act_space.shape[0]
+            #print("Act dimension: ", act_dim)
+            self.actor = MLPContinuousActor(self.obs_dim, hidden_sizes, self.act_dim, activation, device)
+        elif isinstance(act_space, Discrete):
+            self.act_dim = act_space.n
+            #print("Act dimension: ", act_dim)
+            self.actor = MLPDiscreteActor(self.obs_dim, hidden_sizes, self.act_dim, activation, device)
+        else:
+            raise Exception("Action space type should be either Box or Discrete, please use another environment!")
+
+        #print()
+
+    def act(self, obs):
+        with torch.no_grad():
+            #obs = obs.flatten()
+            pi, _ = self.actor(obs)
+        return pi.sample().cpu().numpy()
+        #return pi.sample()
+
+
+    def step(self, obs):
+        with torch.no_grad():
+            #obs = obs.flatten()
+            pi, _ = self.actor(obs)
+            act = pi.sample().squeeze()
+            logp_a = self.actor._log_prob(pi, act)
+            v = self.critic(obs)
+        return act.cpu().numpy(), v.cpu().numpy(), logp_a.cpu().numpy()
+        #return a, v, logp_a
+
+
+def test_modules(env_fn, device='cpu'):
+
+    env = env_fn()
+    obs_dim = env.observation_space.shape
+    act_dim = env.action_space.shape
+
+    print()
+    print("Obs dim: ", obs_dim)
+    print("Act dim: ", act_dim)
+    print()
+
+    ac = MLPActorCritic(env.observation_space, env.action_space, device=device).to(device)
+        
+    obs = np.random.random_sample((2, *obs_dim))
+    #obs = np.random.random_sample(obs_dim)
+    obs = torch.as_tensor(obs, dtype=torch.float32).to(device)
+    print("Obs shape: ", obs.shape)
+
+    
+    v = ac.critic(obs)
+    print()
+    print("Check shapes of critic's forward function:")
+    print(v.shape)
+    print(v)
+
+    a_rand = np.random.random_sample((2, *act_dim))
+    a_rand = torch.as_tensor(a_rand, dtype=torch.float32).to(device)
+    pi, logp_a = ac.actor(obs, a_rand)
+
+    print()
+    print("Check shapes of actor's forward function:")
+    print("pi: ", pi)
+    print("logp_a: ", logp_a)
+    print()
+
+    a, v, logp_a = ac.step(obs)
+
+    print("Check output of step method:")
+    print("Act: ", a)
+    print("Val: ", v)
+    print("logp_a: ", logp_a)
+    print()
+
+    a = ac.act(obs)
+
+    print("Check output of act method:")
+    print("Act: ", a)
+    print()
 
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
+    parser.add_argument('--env', type=str, default='CartPole-v1')
     parser.add_argument('--cuda', action='store_true')
     args = parser.parse_args()
     
@@ -235,3 +355,4 @@ if __name__ == '__main__':
         device = 'cpu'
 
     #test_buffer(device)
+    test_modules(lambda: gym.make(args.env), device)
