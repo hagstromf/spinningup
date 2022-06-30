@@ -17,6 +17,9 @@ class VPGBuffer:
 
     def __init__(self, size, obs_dim, act_dim, gamma=0.99, device='cpu'):
         self.obs_buf = np.repeat(np.zeros(obs_dim, dtype=np.float32)[None, :], size, axis=0)
+        #print(act_dim)
+
+        # TODO Fix act_buf so that it takes correct shape, e.g. if discrete actions should be shape (size, )
         self.act_buf = np.repeat(np.zeros(act_dim, dtype=np.float32)[None, :], size, axis=0)
         self.rew_buf = np.zeros(size, dtype=np.float32)
         self.val_buf = np.zeros(size, dtype=np.float32)
@@ -178,6 +181,8 @@ class Actor(nn.Module):
         pi = self._distribution(obs)
         logp_a = None
         if act is not None:
+            #print(pi)
+            #print(act)
             logp_a = self._log_prob(pi, act)
 
         return pi, logp_a
@@ -185,7 +190,7 @@ class Actor(nn.Module):
 
 class MLPDiscreteActor(Actor):
 
-    def __init__(self, obs_dim, hidden_sizes, act_dim, activation, device='cpu'):
+    def __init__(self, obs_dim, hidden_sizes, act_dim, activation):
         super().__init__()
 
         #print("Obs before: ", obs_dim)
@@ -206,7 +211,7 @@ class MLPDiscreteActor(Actor):
 
 class MLPContinuousActor(Actor):
     
-    def __init__(self, obs_dim, hidden_sizes, act_dim, activation, device='cpu'):
+    def __init__(self, obs_dim, hidden_sizes, act_dim, activation):
         super().__init__()
 
         #print("Obs before: ", obs_dim)
@@ -232,7 +237,7 @@ class MLPCritic(nn.Module):
 
     # TODO: Document Critic class
 
-    def __init__(self, obs_dim, hidden_sizes, activation, device='cpu'):
+    def __init__(self, obs_dim, hidden_sizes, activation):
         super().__init__()
 
         #print("Obs before: ", obs_dim)
@@ -255,7 +260,7 @@ class MLPActorCritic(nn.Module):
 
     # TODO: Document ActorCritic class
     
-    def __init__(self, obs_space, act_space, hidden_sizes=[128, 128], activation=nn.ReLU, device='cpu'):
+    def __init__(self, obs_space, act_space, hidden_sizes=[128, 128], activation=nn.ReLU):
         super().__init__()
 
         self.obs_dim = obs_space.shape
@@ -263,7 +268,7 @@ class MLPActorCritic(nn.Module):
         #print()
         #print("Building critic:")
 
-        self.critic = MLPCritic(self.obs_dim, hidden_sizes, activation, device)
+        self.critic = MLPCritic(self.obs_dim, hidden_sizes, activation)
 
         #print()
         #print("Building actor:")
@@ -271,11 +276,11 @@ class MLPActorCritic(nn.Module):
             #act_dim = act_space.shape[0]
             self.act_dim = act_space.shape[0]
             #print("Act dimension: ", act_dim)
-            self.actor = MLPContinuousActor(self.obs_dim, hidden_sizes, self.act_dim, activation, device)
+            self.actor = MLPContinuousActor(self.obs_dim, hidden_sizes, self.act_dim, activation)
         elif isinstance(act_space, Discrete):
             self.act_dim = act_space.n
             #print("Act dimension: ", act_dim)
-            self.actor = MLPDiscreteActor(self.obs_dim, hidden_sizes, self.act_dim, activation, device)
+            self.actor = MLPDiscreteActor(self.obs_dim, hidden_sizes, self.act_dim, activation)
         else:
             raise Exception("Action space type should be either Box or Discrete, please use another environment!")
 
@@ -292,6 +297,7 @@ class MLPActorCritic(nn.Module):
         with torch.no_grad():
             pi, _ = self.actor(obs)
             act = pi.sample().squeeze()
+            #print(act.shape)
             #logp_a = self.actor._log_prob(pi, act)
             v = self.critic(obs)
         return act.cpu().numpy(), v.cpu().numpy()#, logp_a.cpu().numpy()
@@ -311,7 +317,7 @@ def test_MLPmodules(env_fn, device='cpu'):
     print("Act dim: ", act_dim)
     print()
 
-    ac = MLPActorCritic(env.observation_space, env.action_space, device=device).to(device)
+    ac = MLPActorCritic(env.observation_space, env.action_space).to(device)
         
     obs = np.random.random_sample((2, *obs_dim))
     #obs = np.random.random_sample(obs_dim)
@@ -363,6 +369,5 @@ if __name__ == '__main__':
         device = 'cpu'
 
     print("On device: ", device)
-    test_buffer(device)
-
-    #test_MLPmodules(lambda: gym.make(args.env), device)
+    #test_buffer(device)
+    test_MLPmodules(lambda: gym.make(args.env), device)
