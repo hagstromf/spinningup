@@ -111,7 +111,9 @@ def test_buffer(device='cpu'):
     last_val = 0
     buf.finish_path(last_val)
 
-    data = buf.get()obs, act, rew, val, rtg, adv = data['obs'], data['act'], data['rew'], data['val'], data['rtg'], data['adv']
+    data = buf.get()
+    
+    obs, act, rew, val, rtg, adv = data['obs'], data['act'], data['rew'], data['val'], data['rtg'], data['adv']
     #obs, act, rew, val, logp_a, rtg, adv = data['obs'], data['act'], data['rew'], data['val'], data['logp_a'], data['rtg'], data['adv']
 
     print()
@@ -333,12 +335,13 @@ def test_MLPmodules(env_fn, device='cpu'):
     print("logp_a: ", logp_a)
     print()
 
-    a, v, logp_a = ac.step(obs)
+    a, v = ac.step(obs)
+    #a, v, logp_a = ac.step(obs)
 
     print("Check output of step method:")
     print("Act: ", a)
     print("Val: ", v)
-    print("logp_a: ", logp_a)
+    #print("logp_a: ", logp_a)
     print()
 
     a = ac.act(obs)
