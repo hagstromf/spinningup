@@ -20,7 +20,7 @@ class VPGBuffer:
         self.act_buf = np.repeat(np.zeros(act_dim, dtype=np.float32)[None, :], size, axis=0)
         self.rew_buf = np.zeros(size, dtype=np.float32)
         self.val_buf = np.zeros(size, dtype=np.float32)
-        self.logp_buf = np.zeros(size, dtype=np.float32)
+        #self.logp_buf = np.zeros(size, dtype=np.float32)
 
         self.rtg_buf = np.zeros(size, dtype=np.float32)
         self.adv_buf = np.zeros(size, dtype=np.float32)
@@ -31,7 +31,7 @@ class VPGBuffer:
         self.curr_step, self.path_start, self.max_size = 0, 0, size
 
 
-    def store(self, obs, act, rew, val, logp_a):
+    def store(self, obs, act, rew, val): #, logp_a):
 
         assert self.curr_step < self.max_size
 
@@ -39,7 +39,7 @@ class VPGBuffer:
         self.act_buf[self.curr_step] = act
         self.rew_buf[self.curr_step] = rew
         self.val_buf[self.curr_step] = val
-        self.logp_buf[self.curr_step] = logp_a
+        #self.logp_buf[self.curr_step] = logp_a
 
         self.curr_step += 1
 
@@ -69,8 +69,7 @@ class VPGBuffer:
 
         data = dict(obs=self.obs_buf, act=self.act_buf, 
                     rew=self.rew_buf, val=self.val_buf, 
-                    logp_a=self.logp_buf, rtg=self.rtg_buf, 
-                    adv=self.adv_buf)
+                     rtg=self.rtg_buf, adv=self.adv_buf)#, logp_a=self.logp_buf)
 
         self.curr_step, self.path_start = 0, 0
 
@@ -89,9 +88,9 @@ def test_buffer(device='cpu'):
         a = np.random.random_sample(act_dim)
         r = np.random.rand()
         v = np.random.rand()
-        logp_a = np.random.rand()
+        #logp_a = np.random.rand()
 
-        buf.store(o, a, r, v, logp_a)
+        buf.store(o, a, r, v) #, logp_a)
     
     last_val = 0
     buf.finish_path(last_val)
@@ -105,15 +104,15 @@ def test_buffer(device='cpu'):
         a = np.random.random_sample(act_dim)
         r = np.random.rand()
         v = np.random.rand()
-        logp_a = np.random.rand()
+        #logp_a = np.random.rand()
 
-        buf.store(o, a, r, v, logp_a)
+        buf.store(o, a, r, v) #, logp_a)
 
     last_val = 0
     buf.finish_path(last_val)
 
-    data = buf.get()
-    obs, act, rew, val, logp_a, rtg, adv = data['obs'], data['act'], data['rew'], data['val'], data['logp_a'], data['rtg'], data['adv']
+    data = buf.get()obs, act, rew, val, rtg, adv = data['obs'], data['act'], data['rew'], data['val'], data['rtg'], data['adv']
+    #obs, act, rew, val, logp_a, rtg, adv = data['obs'], data['act'], data['rew'], data['val'], data['logp_a'], data['rtg'], data['adv']
 
     print()
     print("Check shapes of different buffers:")
@@ -124,7 +123,7 @@ def test_buffer(device='cpu'):
     assert rew.shape == (size, )
     print(rew.shape)
     print(val.shape)
-    print(logp_a.shape)
+    #print(logp_a.shape)
     print(rtg.shape)
     print(adv.shape)
     print()
@@ -291,9 +290,9 @@ class MLPActorCritic(nn.Module):
         with torch.no_grad():
             pi, _ = self.actor(obs)
             act = pi.sample().squeeze()
-            logp_a = self.actor._log_prob(pi, act)
+            #logp_a = self.actor._log_prob(pi, act)
             v = self.critic(obs)
-        return act.cpu().numpy(), v.cpu().numpy(), logp_a.cpu().numpy()
+        return act.cpu().numpy(), v.cpu().numpy()#, logp_a.cpu().numpy()
         #return a, v, logp_a
 
 
