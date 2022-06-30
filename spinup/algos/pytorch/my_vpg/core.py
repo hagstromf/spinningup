@@ -20,6 +20,7 @@ class VPGBuffer:
         self.act_buf = np.repeat(np.zeros(act_dim, dtype=np.float32)[None, :], size, axis=0)
         self.rew_buf = np.zeros(size, dtype=np.float32)
         self.val_buf = np.zeros(size, dtype=np.float32)
+        self.logp_buf = np.zeros(size, dtype=np.float32)
 
         self.rtg_buf = np.zeros(size, dtype=np.float32)
         self.adv_buf = np.zeros(size, dtype=np.float32)
@@ -30,14 +31,15 @@ class VPGBuffer:
         self.curr_step, self.path_start, self.max_size = 0, 0, size
 
 
-    def store(self, obs, act, rew, val):
+    def store(self, obs, act, rew, val, logp_a):
 
         assert self.curr_step < self.max_size
 
         self.obs_buf[self.curr_step] = obs
         self.act_buf[self.curr_step] = act
         self.rew_buf[self.curr_step] = rew
-        self.val_buf[self.curr_step]= val
+        self.val_buf[self.curr_step] = val
+        self.logp_buf[self.curr_step] = logp_a
 
         self.curr_step += 1
 
@@ -67,7 +69,8 @@ class VPGBuffer:
 
         data = dict(obs=self.obs_buf, act=self.act_buf, 
                     rew=self.rew_buf, val=self.val_buf, 
-                    rtg=self.rtg_buf, adv=self.adv_buf)
+                    logp_a=self.logp_buf, rtg=self.rtg_buf, 
+                    adv=self.adv_buf)
 
         self.curr_step, self.path_start = 0, 0
 
@@ -86,8 +89,9 @@ def test_buffer(device='cpu'):
         a = np.random.random_sample(act_dim)
         r = np.random.rand()
         v = np.random.rand()
+        logp_a = np.random.rand()
 
-        buf.store(o, a, r, v)
+        buf.store(o, a, r, v, logp_a)
     
     last_val = 0
     buf.finish_path(last_val)
@@ -101,14 +105,15 @@ def test_buffer(device='cpu'):
         a = np.random.random_sample(act_dim)
         r = np.random.rand()
         v = np.random.rand()
+        logp_a = np.random.rand()
 
-        buf.store(o, a, r, v)
+        buf.store(o, a, r, v, logp_a)
 
     last_val = 0
     buf.finish_path(last_val)
 
     data = buf.get()
-    obs, act, rew, val, rtg, adv = data['obs'], data['act'], data['rew'], data['val'], data['rtg'], data['adv']
+    obs, act, rew, val, logp_a, rtg, adv = data['obs'], data['act'], data['rew'], data['val'], data['logp_a'], data['rtg'], data['adv']
 
     print()
     print("Check shapes of different buffers:")
@@ -119,6 +124,7 @@ def test_buffer(device='cpu'):
     assert rew.shape == (size, )
     print(rew.shape)
     print(val.shape)
+    print(logp_a.shape)
     print(rtg.shape)
     print(adv.shape)
     print()
@@ -166,8 +172,8 @@ class Actor(nn.Module):
         raise NotImplementedError
 
     def forward(self, obs, act=None):
-        if obs.ndimension() > 1:
-            obs = torch.flatten(obs, start_dim=1)
+        #if obs.ndimension() > 1:
+        #    obs = torch.flatten(obs, start_dim=1)
         pi = self._distribution(obs)
         logp_a = None
         if act is not None:
@@ -237,9 +243,9 @@ class MLPCritic(nn.Module):
 
     def forward(self, obs):
         #print(obs.ndimension())
-        if obs.ndimension() > 1:
-            obs = torch.flatten(obs, start_dim=1)
-            #print("Flattened obs", obs.shape)
+        #if obs.ndimension() > 1:
+        #    obs = torch.flatten(obs, start_dim=1)
+        #    print("Flattened obs", obs.shape)
         #print(obs.shape)
         return self.v(obs).squeeze() # Ensure v has shape (batch_size, ) instead of (batch_size, 1)
 
@@ -276,7 +282,6 @@ class MLPActorCritic(nn.Module):
 
     def act(self, obs):
         with torch.no_grad():
-            #obs = obs.flatten()
             pi, _ = self.actor(obs)
         return pi.sample().cpu().numpy()
         #return pi.sample()
@@ -284,7 +289,6 @@ class MLPActorCritic(nn.Module):
 
     def step(self, obs):
         with torch.no_grad():
-            #obs = obs.flatten()
             pi, _ = self.actor(obs)
             act = pi.sample().squeeze()
             logp_a = self.actor._log_prob(pi, act)
@@ -293,9 +297,11 @@ class MLPActorCritic(nn.Module):
         #return a, v, logp_a
 
 
-def test_modules(env_fn, device='cpu'):
+def test_MLPmodules(env_fn, device='cpu'):
+    from gym.wrappers import FlattenObservation
 
-    env = env_fn()
+    #env = env_fn()
+    env = FlattenObservation(env_fn())
     obs_dim = env.observation_space.shape
     act_dim = env.action_space.shape
 
@@ -354,5 +360,7 @@ if __name__ == '__main__':
     else:
         device = 'cpu'
 
-    #test_buffer(device)
-    test_modules(lambda: gym.make(args.env), device)
+    print("On device: ", device)
+    test_buffer(device)
+
+    #test_MLPmodules(lambda: gym.make(args.env), device)
