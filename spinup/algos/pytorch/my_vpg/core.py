@@ -19,7 +19,7 @@ class VPGBuffer:
 
         obs_dim = obs_space.shape
         self.obs_buf = np.repeat(np.zeros(obs_dim, dtype=np.float32)[None, :], size, axis=0)
-        
+
         if isinstance(act_space, Discrete):
             act_dim = 1
         else:
@@ -265,7 +265,7 @@ class MLPActorCritic(nn.Module):
 
     # TODO: Document ActorCritic class
     
-    def __init__(self, obs_space, act_space, hidden_sizes=[128, 128], activation=nn.ReLU):
+    def __init__(self, obs_space, act_space, hidden_sizes=[128, 128]*3, activation=nn.ReLU):
         super().__init__()
 
         self.obs_dim = obs_space.shape

@@ -6,7 +6,7 @@ from spinup.utils.logx import EpochLogger
 import gym
 from gym.wrappers import FlattenObservation
 
-import core
+import spinup.algos.pytorch.my_vpg.core as core
 import time
 
 def my_vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0, 
@@ -34,6 +34,8 @@ def my_vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
     # Initialize Actor-Critic network
     ac = actor_critic(env.observation_space, env.action_space, **ac_kwargs).to(device)
 
+    #print("AC is on CUDA:", ac.actor.is_cuda)
+
     # Initialize buffer for collecting trajectories
     buf = core.VPGBuffer(steps_per_epoch, env.observation_space, env.action_space, gamma, device)
 
@@ -54,12 +56,13 @@ def my_vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         loss_info = dict(Entropy=ent)
         
         # If algo is bork, maybe the gradient should be positive instead!!!!
-        return - torch.mean(logp_a * adv), loss_info
+        return -torch.mean(logp_a * adv), loss_info
 
     # Compute the MSE loss for estimating the Value function
     def compute_loss_critic(data):
         o, rtg = data['obs'], data['rtg']
         v = ac.critic(o)
+        #print(v.is_cuda)
         return torch.mean((v - rtg)**2)
 
     # Optimizers for actor and critic networks
@@ -82,6 +85,7 @@ def my_vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 
         for i in range(train_v_iters):
             loss_critic = compute_loss_critic(data)
+            #print("Loss Critic on CUDA:", loss_critic.is_cuda)
             critic_optim.zero_grad()
             loss_critic.backward()
             critic_optim.step()
@@ -102,7 +106,7 @@ def my_vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
             #buf.store(o, a, r, v, logp_a)
 
             # Take one step in the environment
-            a, v = ac.step(torch.as_tensor(o, dtype=torch.float32))
+            a, v = ac.step(torch.as_tensor(o, dtype=torch.float32, device=device))
             o_prime, r, done, _ = env.step(a)
             
             # Store info of current step
@@ -124,13 +128,13 @@ def my_vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
                     last_v = 0
                 else:
                     # If agent is still alive at end of episode we bootstrap the value of next observation 
-                    _, last_v = ac.step(torch.as_tensor(o, dtype=torch.float32))
+                    _, last_v = ac.step(torch.as_tensor(o, dtype=torch.float32, device=device))
                     #last_v = ac.critic(o)
                 
                 buf.finish_path(last_v)
 
                 if terminated:
-                    logger.store(EpisodeReturn=ep_ret, EpisodeLength=ep_len)
+                    logger.store(EpRet=ep_ret, EpLen=ep_len)
 
                 # Reset the environment for new episode
                 o, ep_ret, ep_len = env.reset(), 0, 0
@@ -146,11 +150,14 @@ def my_vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 
         # Print out info summary of epoch
         logger.log_tabular('Epoch', epoch)
-        logger.log_tabular('EpisodeReturn', with_min_and_max=True)
-        logger.log_tabular('EpisodeLength', average_only=True)
+        logger.log_tabular('EpRet', with_min_and_max=True)
+        logger.log_tabular('EpLen', average_only=True)
         logger.log_tabular('LossPolicy', average_only=True)
-        logger.log_tabular('VfuncVals', with_min_and_max=True)
         logger.log_tabular('LossVfunc', average_only=True)
+        logger.log_tabular('VfuncVals', with_min_and_max=True)
+        logger.log_tabular('Entropy', average_only=True)
+        logger.log_tabular('TotalEnvInteracts', (epoch+1)*steps_per_epoch)
+        logger.log_tabular('Time', time.time() - start_time)
         logger.dump_tabular()
             
     return
@@ -181,9 +188,9 @@ if __name__ == '__main__':
     else:
         device = 'cpu'
 
-    print("On device: ", device)    
+    print("\n On device: ", device)    
 
     ac_kwargs = dict(hidden_sizes=[args.hid] * args.depth)
     my_vpg(lambda: gym.make(args.env), actor_critic=core.MLPActorCritic, ac_kwargs=ac_kwargs,
            seed=args.seed, steps_per_epoch=args.steps, epochs=args.epochs, gamma=args.gamma,
-           logger_kwargs=logger_kwargs)
+           logger_kwargs=logger_kwargs, device=device)
