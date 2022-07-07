@@ -27,7 +27,6 @@ def my_vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
     np.random.seed(seed)
     
     env = env_fn()
-    #print(env.action_space.n)
 
     if isinstance(actor_critic, core.MLPActorCritic):
         env = FlattenObservation(env)
@@ -35,11 +34,8 @@ def my_vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
     # Initialize Actor-Critic network
     ac = actor_critic(env.observation_space, env.action_space, **ac_kwargs).to(device)
 
-    obs_shape = env.observation_space.shape
-    act_shape = env.action_space.shape
-    print(act_shape)
     # Initialize buffer for collecting trajectories
-    buf = core.VPGBuffer(steps_per_epoch, obs_shape, act_shape, gamma, device)
+    buf = core.VPGBuffer(steps_per_epoch, env.observation_space, env.action_space, gamma, device)
 
 
     # Estimate the policy gradient
@@ -109,7 +105,6 @@ def my_vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
             a, v = ac.step(torch.as_tensor(o, dtype=torch.float32))
             o_prime, r, done, _ = env.step(a)
             
-            print(a.shape)
             # Store info of current step
             buf.store(o, a, r, v)
 

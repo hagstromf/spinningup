@@ -15,12 +15,17 @@ class VPGBuffer:
     ### TODO:
     # Document the VPGBuffer class and its functions
 
-    def __init__(self, size, obs_dim, act_dim, gamma=0.99, device='cpu'):
-        self.obs_buf = np.repeat(np.zeros(obs_dim, dtype=np.float32)[None, :], size, axis=0)
-        #print(act_dim)
+    def __init__(self, size, obs_space, act_space, gamma=0.99, device='cpu'):
 
-        # TODO Fix act_buf so that it takes correct shape, e.g. if discrete actions should be shape (size, )
+        obs_dim = obs_space.shape
+        self.obs_buf = np.repeat(np.zeros(obs_dim, dtype=np.float32)[None, :], size, axis=0)
+        
+        if isinstance(act_space, Discrete):
+            act_dim = 1
+        else:
+            act_dim = act_space.shape
         self.act_buf = np.repeat(np.zeros(act_dim, dtype=np.float32)[None, :], size, axis=0)
+        
         self.rew_buf = np.zeros(size, dtype=np.float32)
         self.val_buf = np.zeros(size, dtype=np.float32)
         #self.logp_buf = np.zeros(size, dtype=np.float32)
