@@ -3,12 +3,31 @@ import torch
 import torch.nn as nn
 
 import numpy as np
+import scipy
 
 from torch.distributions.normal import Normal
 from torch.distributions.categorical import Categorical
 
 import gym
 from gym.spaces import Discrete, Box
+
+
+def discount_cumsum(x, discount):
+    """
+    magic from rllab for computing discounted cumulative sums of vectors.
+
+    input: 
+        vector x, 
+        [x0, 
+         x1, 
+         x2]
+
+    output:
+        [x0 + discount * x1 + discount^2 * x2,  
+         x1 + discount * x2,
+         x2]
+    """
+    return scipy.signal.lfilter([1], [1, float(-discount)], x[::-1], axis=0)[::-1]
 
 class VPGBuffer:
 
@@ -36,7 +55,7 @@ class VPGBuffer:
         self.gamma = gamma
         self.device = device
 
-        self.curr_step, self.path_start, self.max_size = 0, 0, size
+        self.curr_step, self.path_start, self.path_count, self.max_size = 0, 0, 0, size
 
 
     def store(self, obs, act, rew, val): #, logp_a):
@@ -56,21 +75,36 @@ class VPGBuffer:
         
         path_idx = slice(self.path_start, self.curr_step)
         path_vals = np.append(self.val_buf[path_idx], last_val)
+        
+        ### TD advantage estimation
         #path_rews = self.rew_buf[path_idx]
-
         #self.adv_buf[path_idx] = path_rews + self.gamma * path_vals[1:] - path_vals[:-1]
         #self.rtg_buf[path_idx] = np.cumsum(path_rews[::-1])[::-1]
 
-        path_rews = np.append(self.rew_buf[path_idx], last_val)
+        ### TD advantage estimation and last val added to rewards-to-go
+        #path_rews = np.append(self.rew_buf[path_idx], last_val)
+        #self.adv_buf[path_idx] = path_rews[:-1] + self.gamma * path_vals[1:] - path_vals[:-1]
+        #self.rtg_buf[path_idx] = np.cumsum(path_rews[::-1])[::-1][:-1]
 
-        self.adv_buf[path_idx] = path_rews[:-1] + self.gamma * path_vals[1:] - path_vals[:-1]
-        self.rtg_buf[path_idx] = np.cumsum(path_rews[::-1])[::-1][:-1]
+        ### Monte Carlo advantage estimation
+        #path_rews = self.rew_buf[path_idx]
+        #self.rtg_buf[path_idx] = discount_cumsum(path_rews, self.gamma)
+        #self.adv_buf[path_idx] = self.rtg_buf[path_idx] - path_vals[:-1]
+
+        ### Generalized Advantage Estimation
+        path_rews = np.append(self.rew_buf[path_idx], last_val)
+        delta = path_rews[:-1] + self.gamma * path_vals[1:] - path_vals[:-1]
+        lam = 0.95
+        self.adv_buf[path_idx] = discount_cumsum(delta, self.gamma * lam)
+        self.rtg_buf[path_idx] = discount_cumsum(path_rews, self.gamma)[:-1]
+
 
         # Optional TODO: Implement infinite-horizon discounted rewards-to-go. Not necessary, the finite-horizon undiscounted
         # version, i.e., only counting observed rewards on the trajectory, is fine as well. 
         # path_rews = np.append(self.rew_buf[path_idx], last_val)
         
         self.path_start = self.curr_step
+        self.path_count += 1
     
     def get(self):
 
@@ -78,11 +112,11 @@ class VPGBuffer:
 
         # Normalize advantages 
         adv_mean, adv_std = self.adv_buf.mean(), self.adv_buf.std() #self.adv_buf.std(ddof=1)
-        self.adv_buf = (self.adv_buf - adv_mean) / adv_std
+        adv_buf = (self.adv_buf - adv_mean) / adv_std
 
         data = dict(obs=self.obs_buf, act=self.act_buf, 
                     rew=self.rew_buf, val=self.val_buf, 
-                     rtg=self.rtg_buf, adv=self.adv_buf)#, logp_a=self.logp_buf)
+                    rtg=self.rtg_buf, adv=adv_buf)#, logp_a=self.logp_buf)
 
         self.curr_step, self.path_start = 0, 0
 
@@ -204,8 +238,8 @@ class MLPDiscreteActor(Actor):
         super().__init__()
 
         #print("Obs before: ", obs_dim)
-        if not np.isscalar(obs_dim):
-            obs_dim = np.prod(obs_dim)
+        #if not np.isscalar(obs_dim):
+        #    obs_dim = np.prod(obs_dim)
         #print("Obs after: ", obs_dim)
 
         self.net = mlp([obs_dim] + list(hidden_sizes) + [act_dim], activation)
@@ -225,12 +259,12 @@ class MLPContinuousActor(Actor):
         super().__init__()
 
         #print("Obs before: ", obs_dim)
-        if not np.isscalar(obs_dim):
-            obs_dim = np.prod(obs_dim)
+        #if not np.isscalar(obs_dim):
+        #    obs_dim = np.prod(obs_dim)
         #print("Obs after: ", obs_dim)
 
         self.mu = mlp([obs_dim] + list(hidden_sizes) + [act_dim], activation)
-        self.log_std = nn.parameter.Parameter(-0.5 * torch.ones(act_dim)) #.to(device)
+        self.log_std = nn.Parameter(-0.5 * torch.ones(act_dim, dtype=torch.float32)) #.to(device)
 
     
     def _distribution(self, obs):
@@ -240,7 +274,7 @@ class MLPContinuousActor(Actor):
 
 
     def _log_prob(self, pi, act):
-        return torch.sum(pi.log_prob(act), dim=1)
+        return torch.sum(pi.log_prob(act), dim=-1)
 
 
 class MLPCritic(nn.Module):
@@ -251,9 +285,11 @@ class MLPCritic(nn.Module):
         super().__init__()
 
         #print("Obs before: ", obs_dim)
-        if not np.isscalar(obs_dim):
-            obs_dim = np.prod(obs_dim)
+        #if not np.isscalar(obs_dim):
+        #    obs_dim = np.prod(obs_dim)
         #print("Obs after: ", obs_dim)
+
+        print("Critic architecture:", [obs_dim] + list(hidden_sizes) + [1])
 
         self.v = mlp([obs_dim] + list(hidden_sizes) + [1], activation)
 
@@ -263,7 +299,7 @@ class MLPCritic(nn.Module):
         #    obs = torch.flatten(obs, start_dim=1)
         #    print("Flattened obs", obs.shape)
         #print(obs.shape)
-        return self.v(obs).squeeze() # Ensure v has shape (batch_size, ) instead of (batch_size, 1)
+        return self.v(obs).squeeze(dim=-1) # Ensure v has shape (batch_size, ) instead of (batch_size, 1)
 
 
 class MLPActorCritic(nn.Module):
@@ -273,12 +309,16 @@ class MLPActorCritic(nn.Module):
     def __init__(self, obs_space, act_space, hidden_sizes=[128]*3, activation=nn.ReLU):
         super().__init__()
 
-        obs_dim = obs_space.shape
+        #obs_dim = obs_space.shape
+        obs_dim = obs_space.shape[0]
+
+        print("Obs dim:", obs_dim)
 
         #print()
         #print("Building critic:")
 
         self.critic = MLPCritic(obs_dim, hidden_sizes, activation)
+        print(self.critic)
 
         #print()
         #print("Building actor:")
@@ -294,7 +334,7 @@ class MLPActorCritic(nn.Module):
         else:
             raise Exception("Action space type should be either Box or Discrete, please use another environment!")
 
-        #print()
+        print(self.actor)
 
     def act(self, obs):
         with torch.no_grad():
@@ -317,8 +357,10 @@ class MLPActorCritic(nn.Module):
 def test_MLPmodules(env_fn, device='cpu'):
     from gym.wrappers import FlattenObservation
 
-    #env = env_fn()
-    env = FlattenObservation(env_fn())
+    from spinup.algos.pytorch.vpg.core import MLPActorCritic as ReferenceAC
+
+    env = env_fn()
+    #env = FlattenObservation(env_fn())
     obs_dim = env.observation_space.shape
     act_dim = env.action_space.shape
 
@@ -341,7 +383,7 @@ def test_MLPmodules(env_fn, device='cpu'):
     print(v.shape)
     print(v)
 
-    a_rand = np.random.random_sample((2, *act_dim))
+    a_rand = np.random.random_sample((1, *act_dim))
     a_rand = torch.as_tensor(a_rand, dtype=torch.float32).to(device)
     pi, logp_a = ac.actor(obs, a_rand)
 
@@ -352,6 +394,51 @@ def test_MLPmodules(env_fn, device='cpu'):
     print()
 
     a, v = ac.step(obs)
+    #a, v, logp_a = ac.step(obs)
+
+    print("Check output of step method:")
+    print("Act: ", a)
+    print("Val: ", v)
+    #print("logp_a: ", logp_a)
+    print()
+
+    a = ac.act(obs)
+
+    print("Check output of act method:")
+    print("Act: ", a)
+    print()
+
+
+    print("Checking reference actor-critic!")
+    print()
+
+    ac = ReferenceAC(env.observation_space, env.action_space).to(device)
+    print(ac.v)
+    print(ac.pi)
+        
+    obs = np.random.random_sample((2, *obs_dim))
+    #obs = np.random.random_sample(obs_dim)
+    obs = torch.as_tensor(obs, dtype=torch.float32).to(device)
+    print("Obs shape: ", obs.shape)
+
+    
+    v = ac.v(obs)
+    print()
+    print("Check shapes of critic's forward function:")
+    print(v.shape)
+    print(v)
+
+    a_rand = np.random.random_sample((1, *act_dim))
+    a_rand = torch.as_tensor(a_rand, dtype=torch.float32).to(device)
+    pi, logp_a = ac.pi(obs, a_rand)
+
+    print()
+    print("Check shapes of actor's forward function:")
+    print("pi: ", pi)
+    print("logp_a: ", logp_a)
+    print()
+
+    a, v, _ = ac.step(obs)
     #a, v, logp_a = ac.step(obs)
 
     print("Check output of step method:")

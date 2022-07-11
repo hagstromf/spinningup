@@ -28,8 +28,8 @@ def my_vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
     
     env = env_fn()
 
-    if isinstance(actor_critic, core.MLPActorCritic):
-        env = FlattenObservation(env)
+    #if isinstance(actor_critic, core.MLPActorCritic):
+    #    env = FlattenObservation(env)
 
     # Initialize Actor-Critic network
     ac = actor_critic(env.observation_space, env.action_space, **ac_kwargs).to(device)
@@ -48,6 +48,10 @@ def my_vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         #print(a.shape)
         pi, logp_a = ac.actor(o, a)
 
+        #N = buf.path_count
+        #loss = - 1/N * torch.sum(logp_a * adv)
+        loss = -torch.mean(logp_a * adv)
+        
         #logp_a, adv = data['logp_a'], adv['adv']
 
         # Store some useful info for tracking progress
@@ -56,7 +60,8 @@ def my_vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         loss_info = dict(Entropy=ent)
         
         # If algo is bork, maybe the gradient should be positive instead!!!!
-        return -torch.mean(logp_a * adv), loss_info
+        #return -torch.mean(logp_a * adv), loss_info
+        return loss, loss_info
 
     # Compute the MSE loss for estimating the Value function
     def compute_loss_critic(data):
@@ -95,7 +100,7 @@ def my_vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         # TODO: Logging of relevant info
     
     # Set up for environment interaction
-    o, ep_ret, ep_len = env.reset(), 0, 0
+    o, ep_ret, ep_len = env.reset(seed=seed), 0, 0
     start_time = time.time()
 
     # Main training loop
@@ -138,7 +143,7 @@ def my_vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
                     logger.store(EpRet=ep_ret, EpLen=ep_len)
 
                 # Reset the environment for new episode
-                o, ep_ret, ep_len = env.reset(), 0, 0
+                o, ep_ret, ep_len = env.reset(seed=seed), 0, 0
 
         # Update policy and value function network at end of epoch
         update()
