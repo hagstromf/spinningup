@@ -107,6 +107,7 @@ def my_vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 
             # Take one step in the environment
             a, v = ac.step(torch.as_tensor(o, dtype=torch.float32, device=device))
+            #print(a)
             o_prime, r, done, _ = env.step(a)
             
             # Store info of current step
@@ -127,7 +128,7 @@ def my_vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
                 if done:
                     last_v = 0
                 else:
-                    # If agent is still alive at end of episode we bootstrap the value of next observation 
+                    # If agent is still alive at end of episode we bootstrap the value of the next observation 
                     _, last_v = ac.step(torch.as_tensor(o, dtype=torch.float32, device=device))
                     #last_v = ac.critic(o)
                 

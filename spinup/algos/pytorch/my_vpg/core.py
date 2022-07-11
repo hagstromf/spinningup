@@ -56,10 +56,15 @@ class VPGBuffer:
         
         path_idx = slice(self.path_start, self.curr_step)
         path_vals = np.append(self.val_buf[path_idx], last_val)
-        path_rews = self.rew_buf[path_idx]
+        #path_rews = self.rew_buf[path_idx]
 
-        self.adv_buf[path_idx] = path_rews + self.gamma * path_vals[1:] + path_vals[:-1]
-        self.rtg_buf[path_idx] = np.cumsum(path_rews[::-1])[::-1]
+        #self.adv_buf[path_idx] = path_rews + self.gamma * path_vals[1:] - path_vals[:-1]
+        #self.rtg_buf[path_idx] = np.cumsum(path_rews[::-1])[::-1]
+
+        path_rews = np.append(self.rew_buf[path_idx], last_val)
+
+        self.adv_buf[path_idx] = path_rews[:-1] + self.gamma * path_vals[1:] - path_vals[:-1]
+        self.rtg_buf[path_idx] = np.cumsum(path_rews[::-1])[::-1][:-1]
 
         # Optional TODO: Implement infinite-horizon discounted rewards-to-go. Not necessary, the finite-horizon undiscounted
         # version, i.e., only counting observed rewards on the trajectory, is fine as well. 
@@ -72,7 +77,7 @@ class VPGBuffer:
         assert self.curr_step == self.max_size
 
         # Normalize advantages 
-        adv_mean, adv_std = self.adv_buf.mean(), self.adv_buf.std(ddof=1)
+        adv_mean, adv_std = self.adv_buf.mean(), self.adv_buf.std() #self.adv_buf.std(ddof=1)
         self.adv_buf = (self.adv_buf - adv_mean) / adv_std
 
         data = dict(obs=self.obs_buf, act=self.act_buf, 
@@ -265,27 +270,27 @@ class MLPActorCritic(nn.Module):
 
     # TODO: Document ActorCritic class
     
-    def __init__(self, obs_space, act_space, hidden_sizes=[128, 128]*3, activation=nn.ReLU):
+    def __init__(self, obs_space, act_space, hidden_sizes=[128]*3, activation=nn.ReLU):
         super().__init__()
 
-        self.obs_dim = obs_space.shape
+        obs_dim = obs_space.shape
 
         #print()
         #print("Building critic:")
 
-        self.critic = MLPCritic(self.obs_dim, hidden_sizes, activation)
+        self.critic = MLPCritic(obs_dim, hidden_sizes, activation)
 
         #print()
         #print("Building actor:")
         if isinstance(act_space, Box):
             #act_dim = act_space.shape[0]
-            self.act_dim = act_space.shape[0]
+            act_dim = act_space.shape[0]
             #print("Act dimension: ", act_dim)
-            self.actor = MLPContinuousActor(self.obs_dim, hidden_sizes, self.act_dim, activation)
+            self.actor = MLPContinuousActor(obs_dim, hidden_sizes, act_dim, activation)
         elif isinstance(act_space, Discrete):
-            self.act_dim = act_space.n
+            act_dim = act_space.n
             #print("Act dimension: ", act_dim)
-            self.actor = MLPDiscreteActor(self.obs_dim, hidden_sizes, self.act_dim, activation)
+            self.actor = MLPDiscreteActor(obs_dim, hidden_sizes, act_dim, activation)
         else:
             raise Exception("Action space type should be either Box or Discrete, please use another environment!")
 
@@ -301,7 +306,7 @@ class MLPActorCritic(nn.Module):
     def step(self, obs):
         with torch.no_grad():
             pi, _ = self.actor(obs)
-            act = pi.sample().squeeze()
+            act = pi.sample() #.squeeze()
             #print(act.shape)
             #logp_a = self.actor._log_prob(pi, act)
             v = self.critic(obs)
