@@ -37,7 +37,10 @@ def my_vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
     #print("AC is on CUDA:", ac.actor.is_cuda)
 
     # Initialize buffer for collecting trajectories
-    buf = core.VPGBuffer(steps_per_epoch, env.observation_space, env.action_space, gamma, device)
+    obs_dim = env.observation_space.shape
+    act_dim = env.action_space.shape
+    buf = core.VPGBuffer(steps_per_epoch, obs_dim, act_dim, gamma, device)
+    #buf = core.VPGBuffer(steps_per_epoch, env.observation_space, env.action_space, gamma, device)
 
 
     # Estimate the policy gradient
@@ -100,7 +103,7 @@ def my_vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         # TODO: Logging of relevant info
     
     # Set up for environment interaction
-    o, ep_ret, ep_len = env.reset(seed=seed), 0, 0
+    o, ep_ret, ep_len = env.reset(), 0, 0
     start_time = time.time()
 
     # Main training loop
@@ -143,7 +146,7 @@ def my_vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
                     logger.store(EpRet=ep_ret, EpLen=ep_len)
 
                 # Reset the environment for new episode
-                o, ep_ret, ep_len = env.reset(seed=seed), 0, 0
+                o, ep_ret, ep_len = env.reset(), 0, 0
 
         # Update policy and value function network at end of epoch
         update()

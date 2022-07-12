@@ -34,16 +34,20 @@ class VPGBuffer:
     ### TODO:
     # Document the VPGBuffer class and its functions
 
-    def __init__(self, size, obs_space, act_space, gamma=0.99, device='cpu'):
+    def __init__(self, size, obs_dim, act_dim, gamma=0.99, device='cpu'):
 
-        obs_dim = obs_space.shape
+        #obs_dim = obs_space.shape
         self.obs_buf = np.repeat(np.zeros(obs_dim, dtype=np.float32)[None, :], size, axis=0)
 
-        if isinstance(act_space, Discrete):
-            act_dim = 1
+        #if isinstance(act_space, Discrete):
+        #    act_dim = 1
+        #else:
+        #    act_dim = act_space.shape
+
+        if not act_dim:
+            self.act_buf = np.zeros(size, dtype=np.float32)
         else:
-            act_dim = act_space.shape
-        self.act_buf = np.repeat(np.zeros(act_dim, dtype=np.float32)[None, :], size, axis=0)
+            self.act_buf = np.repeat(np.zeros(act_dim, dtype=np.float32)[None, :], size, axis=0)
         
         self.rew_buf = np.zeros(size, dtype=np.float32)
         self.val_buf = np.zeros(size, dtype=np.float32)
@@ -124,11 +128,15 @@ class VPGBuffer:
 
 
 def test_buffer(device='cpu'):
+    from spinup.algos.pytorch.vpg.vpg import VPGBuffer as SpinupBuf
+
     size = 32
     obs_dim = (10, 3)
-    act_dim = 5
+    #act_dim = 5
+    act_dim = ()
 
     buf = VPGBuffer(size, obs_dim, act_dim, device=device)
+    buf_ref = SpinupBuf(obs_dim, act_dim, size)
 
     for i in range(size):
         o = np.random.random_sample(obs_dim)
@@ -138,38 +146,45 @@ def test_buffer(device='cpu'):
         #logp_a = np.random.rand()
 
         buf.store(o, a, r, v) #, logp_a)
+        #buf_ref.store(o, a, r, v)
     
     last_val = 0
     buf.finish_path(last_val)
+    #buf_ref.finish_path(last_val)
 
     data = buf.get()
     #obs, act, rew, val, rtg, adv = data['obs'], data['act'], data['rew'], data['val'], data['rtg'], data['adv']
 
-    # Test that we can fill the buffer again during next epoch
+    # Test that we can fill the buffer again during next epoch 
     for i in range(size):
         o = np.random.random_sample(obs_dim)
         a = np.random.random_sample(act_dim)
         r = np.random.rand()
         v = np.random.rand()
-        #logp_a = np.random.rand()
+        logp_a = np.random.rand()
 
         buf.store(o, a, r, v) #, logp_a)
+        buf_ref.store(o, a, r, v, logp_a)
 
     last_val = 0
     buf.finish_path(last_val)
+    buf_ref.finish_path(last_val)
 
     data = buf.get()
+    data_ref = buf_ref.get()
     
     obs, act, rew, val, rtg, adv = data['obs'], data['act'], data['rew'], data['val'], data['rtg'], data['adv']
+    obs_ref, act_ref, rtg_ref, adv_ref = data_ref['obs'], data_ref['act'], data_ref['ret'], data_ref['adv']
+
     #obs, act, rew, val, logp_a, rtg, adv = data['obs'], data['act'], data['rew'], data['val'], data['logp_a'], data['rtg'], data['adv']
 
     print()
     print("Check shapes of different buffers:")
-    assert obs.shape == (size, *obs_dim)
+    #assert obs.shape == (size, *obs_dim)
     print(obs.shape)
-    assert act.shape == (size, act_dim)
+    #assert act.shape == (size, act_dim)
     print(act.shape)
-    assert rew.shape == (size, )
+    #assert rew.shape == (size, )
     print(rew.shape)
     print(val.shape)
     #print(logp_a.shape)
@@ -181,6 +196,17 @@ def test_buffer(device='cpu'):
     print("Check that advantages are properly normalized:")
     #print(torch.mean(adv), torch.std(adv), "\n")
     print(adv.mean(), adv.std(), "\n")
+
+    print("Reference Advantage buffer:")
+    print(adv_ref.mean(), adv_ref.std(), "\n")
+
+    print("Check action buffer:")
+    print(act, "\n")
+
+    print("Reference action buffer:")
+    print(act_ref)
+
+
 
 
 def mlp(sizes, activation, output_activation=nn.Identity):
@@ -289,7 +315,7 @@ class MLPCritic(nn.Module):
         #    obs_dim = np.prod(obs_dim)
         #print("Obs after: ", obs_dim)
 
-        print("Critic architecture:", [obs_dim] + list(hidden_sizes) + [1])
+        #print("Critic architecture:", [obs_dim] + list(hidden_sizes) + [1])
 
         self.v = mlp([obs_dim] + list(hidden_sizes) + [1], activation)
 
@@ -312,13 +338,13 @@ class MLPActorCritic(nn.Module):
         #obs_dim = obs_space.shape
         obs_dim = obs_space.shape[0]
 
-        print("Obs dim:", obs_dim)
+        #print("Obs dim:", obs_dim)
 
         #print()
         #print("Building critic:")
 
         self.critic = MLPCritic(obs_dim, hidden_sizes, activation)
-        print(self.critic)
+        print(self.critic, "\n")
 
         #print()
         #print("Building actor:")
@@ -334,7 +360,7 @@ class MLPActorCritic(nn.Module):
         else:
             raise Exception("Action space type should be either Box or Discrete, please use another environment!")
 
-        print(self.actor)
+        print(self.actor, ("\n"))
 
     def act(self, obs):
         with torch.no_grad():
@@ -466,5 +492,5 @@ if __name__ == '__main__':
         device = 'cpu'
 
     print("On device: ", device)
-    #test_buffer(device)
-    test_MLPmodules(lambda: gym.make(args.env), device)
+    test_buffer(device)
+    #test_MLPmodules(lambda: gym.make(args.env), device)
