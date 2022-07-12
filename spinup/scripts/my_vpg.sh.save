@@ -1,7 +1,0 @@
-#!/bin/bash
-
-set -x
-
-declare -a envs="CartPole-v1 MountainCarContinuous-v0 BipedalWalker-v3 LunarLander-v1"
-
-python spinup.run my_vpg --env $envs --data_dir ~/spinningup/data/vpg_exp --exp_name my_vpg --hid\[h\] \[128, 128, 128, 128, --seed 10 20 30 --epochs 150 --dt 
