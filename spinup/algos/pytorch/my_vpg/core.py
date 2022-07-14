@@ -11,6 +11,8 @@ from torch.distributions.categorical import Categorical
 import gym
 from gym.spaces import Discrete, Box
 
+from spinup.utils.mpi_tools import mpi_statistics_scalar
+
 
 def discount_cumsum(x, discount):
     """
@@ -34,7 +36,7 @@ class VPGBuffer:
     ### TODO:
     # Document the VPGBuffer class and its functions
 
-    def __init__(self, size, obs_dim, act_dim, gamma=0.99, device='cpu'):
+    def __init__(self, size, obs_dim, act_dim, gamma=0.99, lam=0.95, device='cpu'):
 
         #obs_dim = obs_space.shape
         self.obs_buf = np.repeat(np.zeros(obs_dim, dtype=np.float32)[None, :], size, axis=0)
@@ -44,6 +46,8 @@ class VPGBuffer:
         #else:
         #    act_dim = act_space.shape
 
+        # Ensure that act_buf has correct shape. When action space is discrete, act_buf should have shape (size,), same as adv_buf,
+        # otherwise actor loss will be calculated incorrectly!
         if not act_dim:
             self.act_buf = np.zeros(size, dtype=np.float32)
         else:
@@ -57,6 +61,7 @@ class VPGBuffer:
         self.adv_buf = np.zeros(size, dtype=np.float32)
 
         self.gamma = gamma
+        self.lam = lam
         self.device = device
 
         self.curr_step, self.path_start, self.path_count, self.max_size = 0, 0, 0, size
@@ -98,14 +103,8 @@ class VPGBuffer:
         ### Generalized Advantage Estimation
         path_rews = np.append(self.rew_buf[path_idx], last_val)
         delta = path_rews[:-1] + self.gamma * path_vals[1:] - path_vals[:-1]
-        lam = 0.95
-        self.adv_buf[path_idx] = discount_cumsum(delta, self.gamma * lam)
+        self.adv_buf[path_idx] = discount_cumsum(delta, self.gamma * self.lam)
         self.rtg_buf[path_idx] = discount_cumsum(path_rews, self.gamma)[:-1]
-
-
-        # Optional TODO: Implement infinite-horizon discounted rewards-to-go. Not necessary, the finite-horizon undiscounted
-        # version, i.e., only counting observed rewards on the trajectory, is fine as well. 
-        # path_rews = np.append(self.rew_buf[path_idx], last_val)
         
         self.path_start = self.curr_step
         self.path_count += 1
@@ -115,12 +114,13 @@ class VPGBuffer:
         assert self.curr_step == self.max_size
 
         # Normalize advantages 
-        adv_mean, adv_std = self.adv_buf.mean(), self.adv_buf.std() #self.adv_buf.std(ddof=1)
-        adv_buf = (self.adv_buf - adv_mean) / adv_std
+        #adv_mean, adv_std = self.adv_buf.mean(), self.adv_buf.std() 
+        adv_mean, adv_std = mpi_statistics_scalar(self.adv_buf)
+        adv_norm = (self.adv_buf - adv_mean) / adv_std
 
         data = dict(obs=self.obs_buf, act=self.act_buf, 
-                    rew=self.rew_buf, val=self.val_buf, 
-                    rtg=self.rtg_buf, adv=adv_buf)#, logp_a=self.logp_buf)
+                    #rew=self.rew_buf, val=self.val_buf, 
+                    rtg=self.rtg_buf, adv=adv_norm)#, logp_a=self.logp_buf)
 
         self.curr_step, self.path_start = 0, 0
 
@@ -135,8 +135,10 @@ def test_buffer(device='cpu'):
     #act_dim = 5
     act_dim = ()
 
-    buf = VPGBuffer(size, obs_dim, act_dim, device=device)
-    buf_ref = SpinupBuf(obs_dim, act_dim, size)
+    lam = 0.95
+
+    buf = VPGBuffer(size, obs_dim, act_dim, device=device, lam=lam)
+    buf_ref = SpinupBuf(obs_dim, act_dim, size, lam=lam)
 
     for i in range(size):
         o = np.random.random_sample(obs_dim)
@@ -173,7 +175,8 @@ def test_buffer(device='cpu'):
     data = buf.get()
     data_ref = buf_ref.get()
     
-    obs, act, rew, val, rtg, adv = data['obs'], data['act'], data['rew'], data['val'], data['rtg'], data['adv']
+    #obs, act, rew, val, rtg, adv = data['obs'], data['act'], data['rew'], data['val'], data['rtg'], data['adv']
+    obs, act, rtg, adv = data['obs'], data['act'], data['rtg'], data['adv']
     obs_ref, act_ref, rtg_ref, adv_ref = data_ref['obs'], data_ref['act'], data_ref['ret'], data_ref['adv']
 
     #obs, act, rew, val, logp_a, rtg, adv = data['obs'], data['act'], data['rew'], data['val'], data['logp_a'], data['rtg'], data['adv']
@@ -181,15 +184,19 @@ def test_buffer(device='cpu'):
     print()
     print("Check shapes of different buffers:")
     #assert obs.shape == (size, *obs_dim)
-    print(obs.shape)
+    print("Obs shape: ", obs.shape)
+    print("Ref Obs shape: ", obs_ref.shape)
     #assert act.shape == (size, act_dim)
-    print(act.shape)
+    print("Act shape: ", act.shape)
+    print("Ref Act shape: ", act_ref.shape)
     #assert rew.shape == (size, )
-    print(rew.shape)
-    print(val.shape)
+    #print(rew.shape)
+    #print(val.shape)
     #print(logp_a.shape)
-    print(rtg.shape)
-    print(adv.shape)
+    print("RTG shape: ", rtg.shape)
+    print("Ref RTG shape: ", rtg_ref.shape)
+    print("Adv shape: ", adv.shape)
+    print("Ref Adv shape: ", adv_ref.shape)
     print()
 
     # Check advantage normalization
@@ -204,8 +211,14 @@ def test_buffer(device='cpu'):
     print(act, "\n")
 
     print("Reference action buffer:")
-    print(act_ref)
+    print(act_ref, "\n")
 
+
+    print("Check RTG buffer:")
+    print(rtg, "\n")
+
+    print("Reference RTG buffer:")
+    print(rtg_ref, "\n")
 
 
 
@@ -325,14 +338,16 @@ class MLPCritic(nn.Module):
         #    obs = torch.flatten(obs, start_dim=1)
         #    print("Flattened obs", obs.shape)
         #print(obs.shape)
-        return self.v(obs).squeeze(dim=-1) # Ensure v has shape (batch_size, ) instead of (batch_size, 1)
+
+        # Ensure v has shape (batch_size, ) instead of (batch_size, 1). Important when calculating critic loss that v and rtg_buf have same shape!
+        return self.v(obs).squeeze(dim=-1) 
 
 
 class MLPActorCritic(nn.Module):
 
     # TODO: Document ActorCritic class
     
-    def __init__(self, obs_space, act_space, hidden_sizes=[128]*3, activation=nn.ReLU):
+    def __init__(self, obs_space, act_space, hidden_sizes=[128]*3, activation=nn.Tanh):
         super().__init__()
 
         #obs_dim = obs_space.shape
@@ -344,7 +359,7 @@ class MLPActorCritic(nn.Module):
         #print("Building critic:")
 
         self.critic = MLPCritic(obs_dim, hidden_sizes, activation)
-        print(self.critic, "\n")
+        #print(self.critic, "\n")
 
         #print()
         #print("Building actor:")
@@ -360,7 +375,7 @@ class MLPActorCritic(nn.Module):
         else:
             raise Exception("Action space type should be either Box or Discrete, please use another environment!")
 
-        print(self.actor, ("\n"))
+        #print(self.actor, ("\n"))
 
     def act(self, obs):
         with torch.no_grad():
@@ -395,7 +410,11 @@ def test_MLPmodules(env_fn, device='cpu'):
     print("Act dim: ", act_dim)
     print()
 
-    ac = MLPActorCritic(env.observation_space, env.action_space).to(device)
+    hid = [128,128,128]
+
+    ac = MLPActorCritic(env.observation_space, env.action_space, hidden_sizes=hid).to(device)
+    print(ac.critic)
+    print(ac.actor)
         
     obs = np.random.random_sample((2, *obs_dim))
     #obs = np.random.random_sample(obs_dim)
@@ -438,7 +457,7 @@ def test_MLPmodules(env_fn, device='cpu'):
     print("Checking reference actor-critic!")
     print()
 
-    ac = ReferenceAC(env.observation_space, env.action_space).to(device)
+    ac = ReferenceAC(env.observation_space, env.action_space, hidden_sizes=hid).to(device)
     print(ac.v)
     print(ac.pi)
         

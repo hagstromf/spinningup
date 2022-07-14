@@ -9,12 +9,20 @@ from gym.wrappers import FlattenObservation
 import spinup.algos.pytorch.my_vpg.core as core
 import time
 
+from spinup.utils.mpi_pytorch import setup_pytorch_for_mpi, sync_params, mpi_avg_grads
+from spinup.utils.mpi_tools import mpi_fork, mpi_avg, proc_id, mpi_statistics_scalar, num_procs
+
 def my_vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0, 
-           steps_per_epoch=4000, epochs=50, gamma=0.99, 
+           steps_per_epoch=4000, epochs=50, gamma=0.99, lam=0.95,
            pi_lr=0.0003, vf_lr=0.001, train_v_iters=80,
            max_ep_len=1000, logger_kwargs=dict(), save_freq=10, device='cpu'):
 
     # TODO: Document entire my_vpg function
+
+    print("Lambda:", lam)
+
+    # Special function to avoid certain slowdowns from PyTorch + MPI combo.
+    setup_pytorch_for_mpi()
 
     # Optional TODO: Implement observation normalization to see if it makes a difference
     
@@ -23,6 +31,7 @@ def my_vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
     logger.save_config(locals())
 
     # Set seed 
+    seed += 10000 * proc_id()
     torch.manual_seed(seed)
     np.random.seed(seed)
     
@@ -34,12 +43,16 @@ def my_vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
     # Initialize Actor-Critic network
     ac = actor_critic(env.observation_space, env.action_space, **ac_kwargs).to(device)
 
+    # Sync params across processes
+    sync_params(ac)
+
     #print("AC is on CUDA:", ac.actor.is_cuda)
 
     # Initialize buffer for collecting trajectories
     obs_dim = env.observation_space.shape
     act_dim = env.action_space.shape
-    buf = core.VPGBuffer(steps_per_epoch, obs_dim, act_dim, gamma, device)
+    local_steps_per_epoch = int(steps_per_epoch / num_procs())
+    buf = core.VPGBuffer(local_steps_per_epoch, obs_dim, act_dim, gamma, lam, device)
     #buf = core.VPGBuffer(steps_per_epoch, env.observation_space, env.action_space, gamma, device)
 
 
@@ -51,9 +64,13 @@ def my_vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         #print(a.shape)
         pi, logp_a = ac.actor(o, a)
 
+        #print((logp_a*adv).shape)
         #N = buf.path_count
         #loss = - 1/N * torch.sum(logp_a * adv)
-        loss = -torch.mean(logp_a * adv)
+        #print(loss)
+        loss = - torch.mean(logp_a * adv)
+        #print("Loss dtype: ", loss.dtype)
+        #print(loss)
         
         #logp_a, adv = data['logp_a'], adv['adv']
 
@@ -87,18 +104,23 @@ def my_vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         loss_actor, actor_info = compute_loss_actor(data)
         actor_optim.zero_grad()
         loss_actor.backward()
+        mpi_avg_grads(ac.actor)    # average grads across MPI processes
         actor_optim.step()
 
         logger.store(LossPolicy=loss_actor.item(), **actor_info)
 
+        
         for i in range(train_v_iters):
             loss_critic = compute_loss_critic(data)
+            #print("Loss dtype: ", loss_critic.dtype)
             #print("Loss Critic on CUDA:", loss_critic.is_cuda)
             critic_optim.zero_grad()
             loss_critic.backward()
+            mpi_avg_grads(ac.critic)    # average grads across MPI processes
             critic_optim.step()
 
             logger.store(LossVfunc=loss_critic.item())
+        
 
         # TODO: Logging of relevant info
     
@@ -108,7 +130,8 @@ def my_vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 
     # Main training loop
     for epoch in range(epochs):
-        for t in range(steps_per_epoch):
+        #for t in range(steps_per_epoch):
+        for t in range(local_steps_per_epoch):
             #a, v, logp_a = ac.step(o)
             #o_prime, r, d, _ = env.step(a)
             #buf.store(o, a, r, v, logp_a)
@@ -128,9 +151,14 @@ def my_vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
             ep_ret += r
             ep_len += 1
 
-            epoch_ended = t == steps_per_epoch-1
+            #print("t: ", t)
+            epoch_ended = t == local_steps_per_epoch-1
             episode_maxed_out = ep_len == max_ep_len
             terminated = done or episode_maxed_out 
+
+            #if epoch_ended:
+            #    print("t:", t)
+            #    print("Steps_per_epoch: ", steps_per_epoch)
 
             if terminated or epoch_ended:
                 if done:
@@ -183,11 +211,14 @@ if __name__ == '__main__':
     parser.add_argument('--hid', type=int, default=128)
     parser.add_argument('--depth', type=int, default=3)
     parser.add_argument('--seed', type=int, default=0)
+    parser.add_argument('--cpu', type=int, default=1)
     parser.add_argument('--steps', type=int, default=4000)
     parser.add_argument('--gamma', type=int, default=0.99)
     parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--cuda', action='store_true')
     args = parser.parse_args()
+
+    mpi_fork(args.cpu)  # run parallel code with mpi
 
     from spinup.utils.run_utils import setup_logger_kwargs
     logger_kwargs = setup_logger_kwargs(args.exp_name, args.seed)

@@ -176,6 +176,8 @@ def vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(),  seed=0,
 
     """
 
+    print("Lambda:", lam)
+
     # Special function to avoid certain slowdowns from PyTorch + MPI combo.
     setup_pytorch_for_mpi()
 
@@ -214,6 +216,7 @@ def vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(),  seed=0,
         # Policy loss
         pi, logp = ac.pi(obs, act)
         loss_pi = -(logp * adv).mean()
+        #print("Loss dtype: ", loss_pi.dtype)
 
         # Useful extra info
         approx_kl = (logp_old - logp).mean().item()
@@ -253,6 +256,7 @@ def vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(),  seed=0,
         for i in range(train_v_iters):
             vf_optimizer.zero_grad()
             loss_v = compute_loss_v(data)
+            #print("Loss dtype: ", loss_v.dtype)
             loss_v.backward()
             mpi_avg_grads(ac.v)    # average grads across MPI processes
             vf_optimizer.step()
@@ -284,9 +288,14 @@ def vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(),  seed=0,
             # Update obs (critical!)
             o = next_o
 
+            #print("t: ", t)
             timeout = ep_len == max_ep_len
             terminal = d or timeout
             epoch_ended = t==local_steps_per_epoch-1
+
+            #if epoch_ended:
+            #    print("t:", t)
+            #    print("Steps_per_epoch: ", steps_per_epoch)
 
             if terminal or epoch_ended:
                 if epoch_ended and not(terminal):
